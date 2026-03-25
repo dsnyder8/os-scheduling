@@ -90,7 +90,7 @@ double Process::getCpuTime() const
 double Process::getTotalRunTime() const
 {
     // Change
-    return (double)remain_time / 1000.0;
+    return (double)total_time / 1000.0;
 }
 
 double Process::getRemainingTime() const

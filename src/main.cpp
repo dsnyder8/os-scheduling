@@ -84,28 +84,85 @@ int main(int argc, char *argv[])
         //lock ready queue mutex before accessing; remember to unlock when done
         shared_data->queue_mutex.lock();
         for(int i = 0; i < processes.size(); i++){
-            
+
         //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
+       
             if(processes[i]->getState() == Process::State::NotStarted){
                 //check the algorithm tpye here?
                 if(current_time - processes[i]->getStartTime() >= 0){
                     processes[i]->setState(Process::State::Ready, currentTime());
-                    shared_data->ready_queue.push_back(processes[i]);
+                    //check the algorithm type here to determine how we want to place it on the queue
+                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
+                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
+                        //place process in ready queue based on shortest job first (i.e. total CPU time for all bursts)
+                        //loop through the ready que and find the first process with a longer remaining CPU burst time and insert the new process before it
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end()){
+                            if((*it)->getRemainingTime() > processes[i]->getRemainingTime()){
+                                shared_data->ready_queue.insert(it, processes[i]);
+                                break;
+                            }
+                            ++it;
+                        }
+                        if(it == shared_data->ready_queue.end()){
+                            shared_data->ready_queue.push_back(processes[i]);
+                        }
+
+
+                    
+                    }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
+
+                    }else{
+                        //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
+
                 }
             }
         //   -Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
             if(processes[i]->getState() == Process::State::IO){
                 uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
-                //double check here if this is correct, should it be current_time - burst_start_time >= burst_time for the current burst?
-                if(current_io_time >= processes[i]->getBurstTime()){
+                if(current_io_time >= processes[i]->getTotalRunTime()){
                     processes[i]->setState(Process::State::Ready, currentTime());
-                    shared_data->ready_queue.push_back(processes[i]);
+                    //check the algorithm type here to determine how we want to place it on the queue
+                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
+                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
+                        //place process in ready queue based on shortest job first (i.e. total CPU time for all bursts)
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end()){
+                            if((*it)->getRemainingTime() > processes[i]->getRemainingTime()){
+                                shared_data->ready_queue.insert(it, processes[i]);
+                                break;
+                            }
+                            ++it;
+                        }
+                        if(it == shared_data->ready_queue.end()){
+                            shared_data->ready_queue.push_back(processes[i]);
+                        }
+
+                    }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
+
+                    }else{
+                        //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
                 }
-            }
-            //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
-            
+                //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
+                    if(shared_data->algorithm == ScheduleAlgorithm::RR){
+                        
+                    }
+
+                    if(shared_data->algorithm == ScheduleAlgorithm::PP){
+
+                    }
+
         //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
-        }
+        
+            //check if any running process needs to be interrupted based on time slice
         shared_data->queue_mutex.unlock();
 
         //   - Determine if all processes are in the terminated state
