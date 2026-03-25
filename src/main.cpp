@@ -80,10 +80,34 @@ int main(int argc, char *argv[])
     {
         // Do the following:
         //   - Get current time
+        uint64_t current_time = currentTime();
+        //lock ready queue mutex before accessing; remember to unlock when done
+        shared_data->queue_mutex.lock();
+        for(int i = 0; i < processes.size(); i++){
+            
         //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
-        //   - *Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
-        //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
+            if(processes[i]->getState() == Process::State::NotStarted){
+                //check the algorithm tpye here?
+                if(current_time - processes[i]->getStartTime() >= 0){
+                    processes[i]->setState(Process::State::Ready, currentTime());
+                    shared_data->ready_queue.push_back(processes[i]);
+                }
+            }
+        //   -Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
+            if(processes[i]->getState() == Process::State::IO){
+                uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
+                //double check here if this is correct, should it be current_time - burst_start_time >= burst_time for the current burst?
+                if(current_io_time >= processes[i]->getBurstTime()){
+                    processes[i]->setState(Process::State::Ready, currentTime());
+                    shared_data->ready_queue.push_back(processes[i]);
+                }
+            }
+            //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
+            
         //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
+        }
+        shared_data->queue_mutex.unlock();
+
         //   - Determine if all processes are in the terminated state
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
 
