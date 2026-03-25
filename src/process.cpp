@@ -129,41 +129,48 @@ void Process::interruptHandled()
 
 void Process::updateProcess(uint64_t current_time)
 {
-    // use `current_time` to update turnaround time, wait time, burst times, 
-    // cpu time, and remaining time
+    turn_time += current_time; // turnaround ticks every time
     
-    // Update overall timers
-    turn_time += current_time;
-    
-    if (burst_times[current_burst] != 0)
+    if (state == State::Running)
     {
-        if (state == State::Running)
-        {
-            cpu_time += current_time;
-            // Subtract from the current CPU burst
-            // Ensure we don't go below 0
-            if (burst_times[current_burst] > current_time) {
-                burst_times[current_burst] -= current_time;
-                remain_time -= current_time;
+        cpu_time += current_time;
+        // 1. Subtract time from the current CPU burst
+        if (burst_times[current_burst] > current_time) {
+            burst_times[current_burst] -= current_time;
+            remain_time -= current_time;
+        } else {
+            // 2. Burst finished!
+            remain_time -= burst_times[current_burst];
+            burst_times[current_burst] = 0;
+
+            // 3. DECIDE: Next CPU burst or Game Over?
+            if (remain_time == 0) {
+                setState(State::Terminated, current_time);
             } else {
-                remain_time -= burst_times[current_burst];
-                burst_times[current_burst] = 0;
+                setState(State::IO, current_time);
+                current_burst++; // Move from CPU index to I/O index
             }
         }
-        else if (state == State::IO)
-        {
-            // Subtract from the current IO burst
-            // Ensure we don't go below 0
-            if (burst_times[current_burst] > current_time) {
-                burst_times[current_burst] -= current_time;
-            } else {
-                burst_times[current_burst] = 0;
+    }
+    else if (state == State::IO)
+    {
+        // 1. Subtract time from current I/O burst
+        if (burst_times[current_burst] > current_time) {
+            burst_times[current_burst] -= current_time;
+        } else {
+            // 2. I/O finished!
+            burst_times[current_burst] = 0;
+            
+            // 3. Move back to Ready and advance index
+            setState(State::Ready, current_time);
+            if (current_burst < num_bursts - 1) {
+                current_burst++; // Move from I/O index to next CPU index
             }
         }
-        else if (state == State::Ready)
-        {
-            wait_time += current_time;
-        }
+    }
+    else if (state == State::Ready)
+    {
+        wait_time += current_time;
     }
 }
 
