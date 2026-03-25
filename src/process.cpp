@@ -89,7 +89,7 @@ double Process::getCpuTime() const
 
 double Process::getTotalRunTime() const
 {
-    // Change
+    // Changed to total_time
     return (double)total_time / 1000.0;
 }
 
@@ -131,6 +131,40 @@ void Process::updateProcess(uint64_t current_time)
 {
     // use `current_time` to update turnaround time, wait time, burst times, 
     // cpu time, and remaining time
+    
+    // Update overall timers
+    turn_time += current_time;
+    
+    if (burst_times[current_burst] != 0)
+    {
+        if (state == State::Running)
+        {
+            cpu_time += current_time;
+            // Subtract from the current CPU burst
+            // Ensure we don't go below 0
+            if (burst_times[current_burst] > current_time) {
+                burst_times[current_burst] -= current_time;
+                remain_time -= current_time;
+            } else {
+                remain_time -= burst_times[current_burst];
+                burst_times[current_burst] = 0;
+            }
+        }
+        else if (state == State::IO)
+        {
+            // Subtract from the current IO burst
+            // Ensure we don't go below 0
+            if (burst_times[current_burst] > current_time) {
+                burst_times[current_burst] -= current_time;
+            } else {
+                burst_times[current_burst] = 0;
+            }
+        }
+        else if (state == State::Ready)
+        {
+            wait_time += current_time;
+        }
+    }
 }
 
 void Process::updateBurstTime(int burst_idx, uint32_t new_time)

@@ -202,6 +202,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+
 void coreRunProcesses(uint8_t core_id, SchedulerData *shared_data)
 {
     // Work to be done by each core idependent of the other cores
@@ -221,7 +222,35 @@ void coreRunProcesses(uint8_t core_id, SchedulerData *shared_data)
     //  - IF READY QUEUE WAS EMPTY
     //   - Wait short bit (i.e. sleep 5 ms)
     //  - * = accesses shared data (ready queue), so be sure to use proper synchronization
+
+    while (!(shared_data->all_terminated))
+    {
+        //lock ready queue mutex before accessing; remember to unlock when done
+        shared_data->queue_mutex.lock();
+        if (!(shared_data->ready_queue.empty()))
+        {
+            Process *p = shared_data->ready_queue.front();
+            shared_data->ready_queue.pop_front();
+            shared_data->queue_mutex.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(shared_data->context_switch));
+            p->setState(Process::State::Running, currentTime());
+            p->setCpuCore(core_id);
+            while (p->getState() == Process::State::Running) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+                p->updateProcess(currentTime());
+                // Check for exit conditions:
+                // 1. Is the current CPU burst finished? (Check p's internal timers)
+                // 2. (For RR) Has the time slice expired? 
+                // 3. (For PP) Has a higher priority process arrived?
+            }
+            
+        }
+
+    }
+
 }
+
 
 void printProcessOutput(std::vector<Process*>& processes)
 {
