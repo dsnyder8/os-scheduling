@@ -208,10 +208,12 @@ int main(int argc, char *argv[])
 
                     }
 
-                    if(shared_data->algorithm == ScheduleAlgorithm::PP && !(shared_data->ready_queue.empty())){
+                    if(shared_data->algorithm == ScheduleAlgorithm::PP ){
                         //thoughts for this: loop through all the processes that are running, if their priority is lower than the priority of the process at the front of the ready queue, then
                         // we need to interrupt them and place them back on the ready queue in their proper position.
                          shared_data->queue_mutex.lock();
+
+                         if(!(shared_data->ready_queue.empty())){
                         Process* front_of_read_queue_priority = shared_data->ready_queue.front();
                         
                         for(int j = 0; j < processes.size();j++ ){
@@ -233,6 +235,7 @@ int main(int argc, char *argv[])
                                 }
                             }
                         }
+                    }
                             shared_data->queue_mutex.unlock();
 
                     }
@@ -251,7 +254,6 @@ int main(int argc, char *argv[])
         shared_data->all_terminated = all_processes_terminated;
 
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
-
         // Maybe simply print progress bar for all procs?
         printProcessOutput(processes);
 
@@ -260,7 +262,6 @@ int main(int argc, char *argv[])
 
                 // clear outout
                 erase();
-            }
         
         }
     }
@@ -271,21 +272,38 @@ int main(int argc, char *argv[])
     }
 
     // print final statistics (use `printw()` for each print, and `refresh()` after all prints)
-    
-    //  - CPU utilization
-    printw("CPU Utilization: %.2f%%\n", /* TODO: calculate this */ 0.0);
-    //  - Throughput
-    //     - Average for first 50% of processes finished
-    printw("Throughput (first 50%% of processes): %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
-    //     - Average for second 50% of processes finished
-    printw("Throughput (second 50%% of processes): %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
-    //     - Overall average
-    printw("Overall Throughput: %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
-    //  - Average turnaround time
-    printw("Average Turnaround Time: %.2f ms\n", /* TODO: calculate this */ 0.0);
-    //  - Average waiting time
-    printw("Average Waiting Time: %.2f ms\n", /* TODO: calculate this */ 0.0);
+    uint64_t end = currentTime();
+    uint64_t total_time = end - start;
+    double total_turnaround_time = 0.0;
+    double total_wait_time = 0.0;
+    double total_cpu_time = 0.0;
+    for (Process* p : processes)    {
+        total_turnaround_time += p->getTurnaroundTime();
+        total_wait_time += p->getWaitTime();
+        total_cpu_time += p->getCpuTime();
+    }
 
+    double average_turnaround_time = total_turnaround_time / processes.size();
+    double average_wait_time = total_wait_time / processes.size();
+
+    double cpu_utilization = (total_cpu_time / (num_cores * total_time / 1000.0)) * 100.0; // Convert ms to seconds and calculate percentage
+    double throughput_first_half = (processes.size() / 2) / (total_time / 1000.0); // Number of processes in first half divided by total time in seconds
+    double throughput_second_half = (processes.size() / 2) / (total_time / 1000.0); // Number of processes in second half divided by total time in seconds   
+    double overall_throughput = processes.size() / (total_time / 1000.0); // Total number of processes divided by total time in seconds 
+    //  - CPU utilization
+    printw("CPU Utilization: %.2f%%\n", cpu_utilization);    //  - Throughput
+    //Average for first 50% of processes finished
+    printw("Throughput (first 50%% of processes): %.2f processes/sec\n", throughput_first_half);    //     - Average for second 50% of processes finished
+    //average throughput for second half of processes
+    printw("Throughput (second 50%% of processes): %.2f processes/sec\n", throughput_second_half);    //     - Overall average
+    //overall throughput
+    printw("Overall Throughput: %.2f processes/sec\n", overall_throughput);    //  - Average turnaround time
+    //average turnaround time
+    printw("Average Turnaround Time: %.2f ms\n", average_turnaround_time);    //  - Average waiting time
+    //Average wait time
+    printw("Average Waiting Time: %.2f ms\n", average_wait_time);
+    
+    refresh();  
 
     // Clean up before quitting program
     processes.clear();
