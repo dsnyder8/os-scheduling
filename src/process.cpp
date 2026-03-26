@@ -201,7 +201,7 @@ void Process::updateBurstTime(int burst_idx, uint32_t new_time)
 {
     burst_times[burst_idx] = new_time;
 }
-
+//added to increment our burst index to get to the next burst
 void Process::changeBurst(){
     current_burst++;
 }

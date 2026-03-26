@@ -84,7 +84,6 @@ int main(int argc, char *argv[])
 
 
         //lock ready queue mutex before accessing; remember to unlock when done
-        shared_data->queue_mutex.lock();
         for(int i = 0; i < processes.size(); i++){
 
         //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
@@ -93,8 +92,10 @@ int main(int argc, char *argv[])
                 //check the algorithm tpye here?
                 if(elapsed_time >= processes[i]->getStartTime()){
                     processes[i]->setState(Process::State::Ready, currentTime());
+                     shared_data->queue_mutex.lock();
                     //here a big if else statement to check which algorithm we want to use putting this back on to the ready queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
+                               
                         shared_data->ready_queue.push_back(processes[i]);
                     }
                     else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
@@ -113,8 +114,6 @@ int main(int argc, char *argv[])
                         if(it == shared_data->ready_queue.end()){
                             shared_data->ready_queue.push_back(processes[i]);
                         }
-
-
                     
                     }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
                         //we have a getPriority function that returns a number from 0-4 
@@ -131,13 +130,15 @@ int main(int argc, char *argv[])
                         if(it == shared_data->ready_queue.end()){
                             shared_data->ready_queue.push_back(processes[i]);
                         }
-
+                        
 
                     }else{
                         //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
                         //thoughts: Will go similar to FCFS but we need to implement the time slice, unsure yet *update later*
                         shared_data->ready_queue.push_back(processes[i]);
+
                     }
+                shared_data->queue_mutex.unlock();
 
                 }
             }
@@ -147,6 +148,8 @@ int main(int argc, char *argv[])
                 if(current_io_time >= processes[i]->getCurrentBurstTime()){
                     processes[i]->changeBurst(); 
                     processes[i]->setState(Process::State::Ready, currentTime());
+
+                    shared_data->queue_mutex.lock();
                     //check the algorithm type here to determine how we want to place it on the queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
                         shared_data->ready_queue.push_back(processes[i]);
@@ -182,9 +185,12 @@ int main(int argc, char *argv[])
                         //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
                         shared_data->ready_queue.push_back(processes[i]);
                     }
+                    shared_data->queue_mutex.unlock();
                 }
                 //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
                     if(shared_data->algorithm == ScheduleAlgorithm::RR){
+
+                         shared_data->queue_mutex.lock();
                         //thoughts for this: loop through all the processes that are running, if their currentBurstTime is greater than the time slice, then we need to interrupt them and place them bac on the ready queue. 
                         for(int j = 0; j < processes.size();j++ ){
                             if (processes[j]->getState() == Process::State::Running) {
@@ -195,13 +201,17 @@ int main(int argc, char *argv[])
                                     //place back on ready queue based on algorithm
                                     shared_data->ready_queue.push_back(processes[j]);
                                 }
+
                             }
                         }
+                        shared_data->queue_mutex.unlock();
+
                     }
 
                     if(shared_data->algorithm == ScheduleAlgorithm::PP && !(shared_data->ready_queue.empty())){
                         //thoughts for this: loop through all the processes that are running, if their priority is lower than the priority of the process at the front of the ready queue, then
                         // we need to interrupt them and place them back on the ready queue in their proper position.
+                         shared_data->queue_mutex.lock();
                         Process* front_of_read_queue_priority = shared_data->ready_queue.front();
                         
                         for(int j = 0; j < processes.size();j++ ){
@@ -219,27 +229,27 @@ int main(int argc, char *argv[])
                                     }
                                     if(it == shared_data->ready_queue.end()){
                                     shared_data->ready_queue.push_back(processes[j]);
-                        }
+                                    }
                                 }
                             }
                         }
+                            shared_data->queue_mutex.unlock();
 
                     }
 
                 //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
                 
-                    //check if any running process needs to be interrupted based on time slice
-                shared_data->queue_mutex.unlock();
-
+        //check if any running process needs to be interrupted based on time slice
         //   - Determine if all processes are in the terminated state
         bool all_processes_terminated = true;
-        for(int i = 0; i < processes.size(); i++){
-            if(processes[i]->getState() != Process::State::Terminated){
+        for(Process* p : processes){
+            if(p->getState() != Process::State::Terminated){
                 all_processes_terminated = false;
                 break;
-            }
-            shared_data->all_terminated = all_processes_terminated;
+            }       
         }
+        shared_data->all_terminated = all_processes_terminated;
+
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
 
         // Maybe simply print progress bar for all procs?
@@ -261,6 +271,7 @@ int main(int argc, char *argv[])
     }
 
     // print final statistics (use `printw()` for each print, and `refresh()` after all prints)
+    
     //  - CPU utilization
     printw("CPU Utilization: %.2f%%\n", /* TODO: calculate this */ 0.0);
     //  - Throughput
