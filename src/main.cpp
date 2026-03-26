@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
             if(processes[i]->getState() == Process::State::IO){
                 uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
                 if(current_io_time >= processes[i]->getCurrentBurstTime()){
-                    processesp[i]->changeBurst(); 
+                    processes[i]->changeBurst(); 
                     processes[i]->setState(Process::State::Ready, currentTime());
                     //check the algorithm type here to determine how we want to place it on the queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
