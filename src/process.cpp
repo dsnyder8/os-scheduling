@@ -98,6 +98,18 @@ double Process::getRemainingTime() const
     return (double)remain_time / 1000.0;
 }
 
+double Process::getCurrentBurstTime() const
+{
+    if (current_burst < num_bursts)
+    {
+        return (double)burst_times[current_burst] / 1000.0;
+    }
+    else
+    {
+        return 0.0;
+    }
+}
+
 void Process::setBurstStartTime(uint64_t current_time)
 {
     burst_start_time = current_time;

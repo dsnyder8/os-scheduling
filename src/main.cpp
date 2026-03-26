@@ -76,29 +76,31 @@ int main(int argc, char *argv[])
 
     // Main thread work goes here
     initscr();
-    while (!(shared_data->all_terminated))
-    {
+    while (!(shared_data->all_terminated)){
         // Do the following:
         //   - Get current time
         uint64_t current_time = currentTime();
+        uint64_t elapsed_time = current_time - start;
+
+
         //lock ready queue mutex before accessing; remember to unlock when done
         shared_data->queue_mutex.lock();
         for(int i = 0; i < processes.size(); i++){
-
         //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
-       
             if(processes[i]->getState() == Process::State::NotStarted){
                 //check the algorithm tpye here?
-                if(current_time - processes[i]->getStartTime() >= 0){
+                if(elapsed_time >= processes[i]->getStartTime()){
                     processes[i]->setState(Process::State::Ready, currentTime());
-                    //check the algorithm type here to determine how we want to place it on the queue
+                    //here a big if else statement to check which algorithm we want to use putting this back on to the ready queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
                         shared_data->ready_queue.push_back(processes[i]);
                     }
                     else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
                         //place process in ready queue based on shortest job first (i.e. total CPU time for all bursts)
-                        //loop through the ready que and find the first process with a longer remaining CPU burst time and insert the new process before it
+                        //have to use iterator here because the ready queue is a list not a vector, so we can't use indexing
+                        //thoughts before implementing: iterate through the ready que and find the first process with a longer remaining CPU burst time and insert the new process before it
                         std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+
                         while(it != shared_data->ready_queue.end()){
                             if((*it)->getRemainingTime() > processes[i]->getRemainingTime()){
                                 shared_data->ready_queue.insert(it, processes[i]);
@@ -113,9 +115,25 @@ int main(int argc, char *argv[])
 
                     
                     }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
+                        //we have a getPriority function that returns a number from 0-4 
+                        //Thought before implementing: loop through the ready queue checking each priority number until we find a process with a lower priority number than the new process,
+                        // and insert the new process before it. If we reach the end of the ready queue without finding a lower priority number, insert the new process at the end of the ready queue.
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end()){
+                            if((*it)->getPriority() > processes[i]->getPriority()){
+                                shared_data->ready_queue.insert(it, processes[i]);
+                                break;
+                            }
+                            ++it;
+                        }
+                        if(it == shared_data->ready_queue.end()){
+                            shared_data->ready_queue.push_back(processes[i]);
+                        }
+
 
                     }else{
                         //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
+                        //thoughts: Will go similar to FCFS but we need to implement the time slice, unsure yet *update later*
                         shared_data->ready_queue.push_back(processes[i]);
                     }
 
@@ -124,7 +142,7 @@ int main(int argc, char *argv[])
         //   -Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
             if(processes[i]->getState() == Process::State::IO){
                 uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
-                if(current_io_time >= processes[i]->getTotalRunTime()){
+                if(current_io_time >= processes[i]->getCurrentBurstTime()){
                     processes[i]->setState(Process::State::Ready, currentTime());
                     //check the algorithm type here to determine how we want to place it on the queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
@@ -145,6 +163,17 @@ int main(int argc, char *argv[])
                         }
 
                     }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end()){
+                            if((*it)->getPriority() > processes[i]->getPriority()){
+                                shared_data->ready_queue.insert(it, processes[i]);
+                                break;
+                            }
+                            ++it;
+                        }
+                        if(it == shared_data->ready_queue.end()){
+                            shared_data->ready_queue.push_back(processes[i]);
+                        }
 
                     }else{
                         //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
@@ -153,7 +182,18 @@ int main(int argc, char *argv[])
                 }
                 //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
                     if(shared_data->algorithm == ScheduleAlgorithm::RR){
-                        
+                        //thoughts for this: loop through all the processes that are running, if their currentBurstTime is greater than the time slice, then we need to interrupt them and place them bac on the ready queue. 
+                        for(int j = 0; j < processes.size();j++ ){
+                            if (processes[j]->getState() == Process::State::Running) {
+                                uint64_t current_burst_time = processes[j]->getCurrentBurstTime();
+                                if(current_burst_time > shared_data->time_slice){
+                                    processes[j]->interrupt();
+                                    processes[j]->setState(Process::State::Ready, currentTime());
+                                    //place back on ready queue based on algorithm
+                                    shared_data->ready_queue.push_back(processes[j]);
+                                }
+                            }
+                        }
                     }
 
                     if(shared_data->algorithm == ScheduleAlgorithm::PP){
@@ -167,7 +207,14 @@ int main(int argc, char *argv[])
 
         //   - Determine if all processes are in the terminated state
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
-
+                    for(int i = 0; i < processes.size(); i++){
+                        if(processes[i]->getState() != Process::State::Terminated){
+                            shared_data->all_terminated = false;
+                            break;
+                        }else{
+                            shared_data->all_terminated = true;
+                        }
+                    }
         // Maybe simply print progress bar for all procs?
         printProcessOutput(processes);
 
@@ -187,12 +234,18 @@ int main(int argc, char *argv[])
 
     // print final statistics (use `printw()` for each print, and `refresh()` after all prints)
     //  - CPU utilization
+    printw("CPU Utilization: %.2f%%\n", /* TODO: calculate this */ 0.0);
     //  - Throughput
     //     - Average for first 50% of processes finished
+    printw("Throughput (first 50%% of processes): %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
     //     - Average for second 50% of processes finished
+    printw("Throughput (second 50%% of processes): %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
     //     - Overall average
+    printw("Overall Throughput: %.2f processes/sec\n", /* TODO: calculate this */ 0.0);
     //  - Average turnaround time
+    printw("Average Turnaround Time: %.2f ms\n", /* TODO: calculate this */ 0.0);
     //  - Average waiting time
+    printw("Average Waiting Time: %.2f ms\n", /* TODO: calculate this */ 0.0);
 
 
     // Clean up before quitting program
