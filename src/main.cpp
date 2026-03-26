@@ -86,7 +86,9 @@ int main(int argc, char *argv[])
         //lock ready queue mutex before accessing; remember to unlock when done
         shared_data->queue_mutex.lock();
         for(int i = 0; i < processes.size(); i++){
+
         //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
+       
             if(processes[i]->getState() == Process::State::NotStarted){
                 //check the algorithm tpye here?
                 if(elapsed_time >= processes[i]->getStartTime()){
@@ -200,32 +202,26 @@ int main(int argc, char *argv[])
 
                     }
 
-        //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
-        
-            //check if any running process needs to be interrupted based on time slice
-        shared_data->queue_mutex.unlock();
+                //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
+                
+                    //check if any running process needs to be interrupted based on time slice
+                shared_data->queue_mutex.unlock();
 
         //   - Determine if all processes are in the terminated state
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
-                    for(int i = 0; i < processes.size(); i++){
-                        if(processes[i]->getState() != Process::State::Terminated){
-                            shared_data->all_terminated = false;
-                            break;
-                        }else{
-                            shared_data->all_terminated = true;
-                        }
-                    }
+
         // Maybe simply print progress bar for all procs?
         printProcessOutput(processes);
 
-        // sleep 50 ms
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                // sleep 50 ms
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-        // clear outout
-        erase();
+                // clear outout
+                erase();
+            }
+        
+        }
     }
-
-
     // wait for threads to finish
     for (i = 0; i < num_cores; i++)
     {
@@ -288,16 +284,55 @@ void coreRunProcesses(uint8_t core_id, SchedulerData *shared_data)
             std::this_thread::sleep_for(std::chrono::milliseconds(shared_data->context_switch));
             p->setState(Process::State::Running, currentTime());
             p->setCpuCore(core_id);
-            while (p->getState() == Process::State::Running) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
+            p->setBurstStartTime(currentTime());
+
+            uint32_t time_on_core = 0; // Local counter for RR
+
+            while (p->getState() == Process::State::Running) 
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                uint64_t now = currentTime();
+                time_on_core += now - p->getBurstStartTime();
                 p->updateProcess(currentTime());
-                // Check for exit conditions:
-                // 1. Is the current CPU burst finished? (Check p's internal timers)
-                // 2. (For RR) Has the time slice expired? 
-                // 3. (For PP) Has a higher priority process arrived?
+
+                // Check for interruptions
+                if (shared_data->algorithm == ScheduleAlgorithm::RR && time_on_core >= shared_data->time_slice) 
+                {
+                    p->setState(Process::State::Ready, currentTime());
+                } 
+                else if (shared_data->algorithm == ScheduleAlgorithm::PP) 
+                {
+                    // PP Preemption Check
+                    shared_data->queue_mutex.lock();
+                    if (!shared_data->ready_queue.empty() && shared_data->ready_queue.front()->getPriority() < p->getPriority()) {
+                        p->setState(Process::State::Ready, currentTime());
+                    }
+                    shared_data->queue_mutex.unlock();
+                }
+                // Note: If updateProcess() sees the burst hit 0, it changes state to IO or Terminated, 
+                // which naturally breaks this while loop!
             }
-            
+
+            // POST-RUN CLEANUP
+            p->setCpuCore(-1);
+
+            // If interrupted (RR or PP), put it back in the queue
+            if (p->getState() == Process::State::Ready) 
+            {
+                shared_data->queue_mutex.lock();
+                // TODO: If PP, you might need to sort. For RR, just push_back.
+                shared_data->ready_queue.push_back(p); 
+                shared_data->queue_mutex.unlock();
+            }
+
+            // Wait context switching SAVE time
+            std::this_thread::sleep_for(std::chrono::milliseconds(shared_data->context_switch));
+
+        }
+        else
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
     }
