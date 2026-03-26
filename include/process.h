@@ -51,6 +51,8 @@ public:
     void interrupt();
     void interruptHandled();
 
+    void changeBurst();
+    
     void updateProcess(uint64_t current_time);
     void updateBurstTime(int burst_idx, uint32_t new_time);
 };

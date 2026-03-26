@@ -145,6 +145,7 @@ int main(int argc, char *argv[])
             if(processes[i]->getState() == Process::State::IO){
                 uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
                 if(current_io_time >= processes[i]->getCurrentBurstTime()){
+                    processesp[i]->changeBurst(); 
                     processes[i]->setState(Process::State::Ready, currentTime());
                     //check the algorithm type here to determine how we want to place it on the queue
                     if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
@@ -198,7 +199,30 @@ int main(int argc, char *argv[])
                         }
                     }
 
-                    if(shared_data->algorithm == ScheduleAlgorithm::PP){
+                    if(shared_data->algorithm == ScheduleAlgorithm::PP && !(shared_data->ready_queue.empty())){
+                        //thoughts for this: loop through all the processes that are running, if their priority is lower than the priority of the process at the front of the ready queue, then
+                        // we need to interrupt them and place them back on the ready queue in their proper position.
+                        Process* front_of_read_queue_priority = shared_data->ready_queue.front();
+                        
+                        for(int j = 0; j < processes.size();j++ ){
+                            if (processes[j]->getState() == Process::State::Running) {
+                                if(processes[j]->getPriority() > shared_data->ready_queue.front()->getPriority()){
+                                    processes[j]->interrupt();
+                                    processes[j]->setState(Process::State::Ready, currentTime());
+                                    std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                                    while(it != shared_data->ready_queue.end()){
+                                        if((*it)->getPriority() > processes[j]->getPriority()){
+                                            shared_data->ready_queue.insert(it, processes[j]);
+                                            break;
+                                        }
+                                        ++it;
+                                    }
+                                    if(it == shared_data->ready_queue.end()){
+                                    shared_data->ready_queue.push_back(processes[j]);
+                        }
+                                }
+                            }
+                        }
 
                     }
 
@@ -208,6 +232,14 @@ int main(int argc, char *argv[])
                 shared_data->queue_mutex.unlock();
 
         //   - Determine if all processes are in the terminated state
+        bool all_processes_terminated = true;
+        for(int i = 0; i < processes.size(); i++){
+            if(processes[i]->getState() != Process::State::Terminated){
+                all_processes_terminated = false;
+                break;
+            }
+            shared_data->all_terminated = all_processes_terminated;
+        }
         //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
 
         // Maybe simply print progress bar for all procs?
