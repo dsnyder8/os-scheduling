@@ -76,194 +76,170 @@ int main(int argc, char *argv[])
 
     // Main thread work goes here
     initscr();
-    while (!(shared_data->all_terminated)){
+    int terminated_count = 0;
+    uint64_t time_half_terminated = 0;
+    while (!(shared_data->all_terminated))
+    {
         // Do the following:
         //   - Get current time
+        //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
+        //   - *Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
+        //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
+        //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
+        //   - Determine if all processes are in the terminated state
+        //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
+
+
+        // Get current absolute time and elapsed simulation time
         uint64_t current_time = currentTime();
         uint64_t elapsed_time = current_time - start;
 
-
-        //lock ready queue mutex before accessing; remember to unlock when done
-        for(int i = 0; i < processes.size(); i++){
-
-        //   - *Check if any processes need to move from NotStarted to Ready (based on elapsed time), and if so put that process in the ready queue
-       
-            if(processes[i]->getState() == Process::State::NotStarted){
-                //check the algorithm tpye here?
-                if(elapsed_time >= processes[i]->getStartTime()){
+        for(int i = 0; i < processes.size(); i++)
+        {
+            // Move from NotStarted to Ready when start time arrives
+            if(processes[i]->getState() == Process::State::NotStarted)
+            {
+                if(elapsed_time >= processes[i]->getStartTime())
+                {
                     processes[i]->setState(Process::State::Ready, currentTime());
-                     shared_data->queue_mutex.lock();
-                    //here a big if else statement to check which algorithm we want to use putting this back on to the ready queue
-                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
-                               
-                        shared_data->ready_queue.push_back(processes[i]);
-                    }
-                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
-                        //place process in ready queue based on shortest job first (i.e. total CPU time for all bursts)
-                        //have to use iterator here because the ready queue is a list not a vector, so we can't use indexing
-                        //thoughts before implementing: iterate through the ready que and find the first process with a longer remaining CPU burst time and insert the new process before it
-                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
-
-                        while(it != shared_data->ready_queue.end()){
-                            if((*it)->getRemainingTime() > processes[i]->getRemainingTime()){
-                                shared_data->ready_queue.insert(it, processes[i]);
-                                break;
-                            }
-                            ++it;
-                        }
-                        if(it == shared_data->ready_queue.end()){
-                            shared_data->ready_queue.push_back(processes[i]);
-                        }
+                    processes[i]->setBurstStartTime(currentTime()); // Initialize wait timer
                     
-                    }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
-                        //we have a getPriority function that returns a number from 0-4 
-                        //Thought before implementing: loop through the ready queue checking each priority number until we find a process with a lower priority number than the new process,
-                        // and insert the new process before it. If we reach the end of the ready queue without finding a lower priority number, insert the new process at the end of the ready queue.
-                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
-                        while(it != shared_data->ready_queue.end()){
-                            if((*it)->getPriority() > processes[i]->getPriority()){
-                                shared_data->ready_queue.insert(it, processes[i]);
-                                break;
-                            }
-                            ++it;
-                        }
-                        if(it == shared_data->ready_queue.end()){
-                            shared_data->ready_queue.push_back(processes[i]);
-                        }
-                        
-
-                    }else{
-                        //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
-                        //thoughts: Will go similar to FCFS but we need to implement the time slice, unsure yet *update later*
-                        shared_data->ready_queue.push_back(processes[i]);
-
-                    }
-                shared_data->queue_mutex.unlock();
-
-                }
-            }
-        //   -Check if any processes have finished their I/O burst, and if so put that process back in the ready queue
-            if(processes[i]->getState() == Process::State::IO){
-                uint64_t current_io_time = current_time - processes[i]->getBurstStartTime();
-                if(current_io_time >= processes[i]->getCurrentBurstTime()){
-                    processes[i]->changeBurst(); 
-                    processes[i]->setState(Process::State::Ready, currentTime());
-
                     shared_data->queue_mutex.lock();
-                    //check the algorithm type here to determine how we want to place it on the queue
-                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS){
+                    
+                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS)
+                    {
+                        // FCFS: Place at the back of the queue
                         shared_data->ready_queue.push_back(processes[i]);
                     }
-                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF){
-                        //place process in ready queue based on shortest job first (i.e. total CPU time for all bursts)
+                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF)
+                    {
+                        // SJF: Insert before the first process with a longer remaining time
                         std::list<Process*>::iterator it = shared_data->ready_queue.begin();
-                        while(it != shared_data->ready_queue.end()){
-                            if((*it)->getRemainingTime() > processes[i]->getRemainingTime()){
+                        while(it != shared_data->ready_queue.end())
+                        {
+                            if((*it)->getRemainingTime() > processes[i]->getRemainingTime())
+                            {
                                 shared_data->ready_queue.insert(it, processes[i]);
                                 break;
                             }
                             ++it;
                         }
-                        if(it == shared_data->ready_queue.end()){
+                        if(it == shared_data->ready_queue.end())
+                        {
                             shared_data->ready_queue.push_back(processes[i]);
                         }
-
-                    }else if(shared_data->algorithm == ScheduleAlgorithm::PP){
+                    }
+                    else if(shared_data->algorithm == ScheduleAlgorithm::PP)
+                    {
+                        // PP: Insert before the first process with a worse (higher) priority
                         std::list<Process*>::iterator it = shared_data->ready_queue.begin();
-                        while(it != shared_data->ready_queue.end()){
-                            if((*it)->getPriority() > processes[i]->getPriority()){
+                        while(it != shared_data->ready_queue.end())
+                        {
+                            if((*it)->getPriority() > processes[i]->getPriority())
+                            {
                                 shared_data->ready_queue.insert(it, processes[i]);
                                 break;
                             }
                             ++it;
                         }
-                        if(it == shared_data->ready_queue.end()){
+                        if(it == shared_data->ready_queue.end())
+                        {
                             shared_data->ready_queue.push_back(processes[i]);
                         }
-
-                    }else{
-                        //default to RR for now, we don't care about ordering in RR so we want to just place it in the back of the queue and do the time splice logic where needed
+                    }
+                    else
+                    {
+                        // RR: Place at the back of the queue
                         shared_data->ready_queue.push_back(processes[i]);
                     }
+                    
                     shared_data->queue_mutex.unlock();
                 }
-                //   - *Check if any running process need to be interrupted (RR time slice expires or newly ready process has higher priority)
-                    if(shared_data->algorithm == ScheduleAlgorithm::RR){
+            }
 
-                         shared_data->queue_mutex.lock();
-                        //thoughts for this: loop through all the processes that are running, if their currentBurstTime is greater than the time slice, then we need to interrupt them and place them bac on the ready queue. 
-                        for(int j = 0; j < processes.size();j++ ){
-                            if (processes[j]->getState() == Process::State::Running) {
-                                uint64_t current_burst_time = processes[j]->getCurrentBurstTime();
-                                if(current_burst_time > shared_data->time_slice){
-                                    processes[j]->interrupt();
-                                    processes[j]->setState(Process::State::Ready, currentTime());
-                                    //place back on ready queue based on algorithm
-                                    shared_data->ready_queue.push_back(processes[j]);
-                                }
-
-                            }
-                        }
-                        shared_data->queue_mutex.unlock();
-
-                    }
-
-                    if(shared_data->algorithm == ScheduleAlgorithm::PP ){
-                        //thoughts for this: loop through all the processes that are running, if their priority is lower than the priority of the process at the front of the ready queue, then
-                        // we need to interrupt them and place them back on the ready queue in their proper position.
-                         shared_data->queue_mutex.lock();
-
-                         if(!(shared_data->ready_queue.empty())){
-                        Process* front_of_read_queue_priority = shared_data->ready_queue.front();
-                        
-                        for(int j = 0; j < processes.size();j++ ){
-                            if (processes[j]->getState() == Process::State::Running) {
-                                if(processes[j]->getPriority() > shared_data->ready_queue.front()->getPriority()){
-                                    processes[j]->interrupt();
-                                    processes[j]->setState(Process::State::Ready, currentTime());
-                                    std::list<Process*>::iterator it = shared_data->ready_queue.begin();
-                                    while(it != shared_data->ready_queue.end()){
-                                        if((*it)->getPriority() > processes[j]->getPriority()){
-                                            shared_data->ready_queue.insert(it, processes[j]);
-                                            break;
-                                        }
-                                        ++it;
-                                    }
-                                    if(it == shared_data->ready_queue.end()){
-                                    shared_data->ready_queue.push_back(processes[j]);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                            shared_data->queue_mutex.unlock();
-
-                    }
-
-                //     - NOTE: ensure processes are inserted into the ready queue at the proper position based on algorithm
+            // Update timers and move finished I/O bursts to the Ready queue
+            if(processes[i]->getState() == Process::State::IO)
+            {
+                processes[i]->updateProcess(current_time);
                 
-        //check if any running process needs to be interrupted based on time slice
-        //   - Determine if all processes are in the terminated state
-        bool all_processes_terminated = true;
-        for(Process* p : processes){
-            if(p->getState() != Process::State::Terminated){
-                all_processes_terminated = false;
-                break;
-            }       
-        }
-        shared_data->all_terminated = all_processes_terminated;
+                // If updateProcess finished the I/O, it automatically changes state to Ready
+                if(processes[i]->getState() == Process::State::Ready)
+                {
+                    shared_data->queue_mutex.lock();
+                    
+                    if(shared_data->algorithm == ScheduleAlgorithm::FCFS) 
+                    {
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
+                    else if(shared_data->algorithm == ScheduleAlgorithm::SJF) 
+                    {
+                        // SJF: Maintain sorted order based on remaining time
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end() && (*it)->getRemainingTime() <= processes[i]->getRemainingTime()) {
+                            ++it;
+                        }
+                        shared_data->ready_queue.insert(it, processes[i]);
+                    }
+                    else if(shared_data->algorithm == ScheduleAlgorithm::PP) 
+                    {
+                        // PP: Maintain sorted order based on priority
+                        std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                        while(it != shared_data->ready_queue.end() && (*it)->getPriority() <= processes[i]->getPriority()) {
+                            ++it;
+                        }
+                        shared_data->ready_queue.insert(it, processes[i]);
+                    }
+                    else 
+                    {
+                        shared_data->ready_queue.push_back(processes[i]);
+                    }
+                    
+                    shared_data->queue_mutex.unlock();
+                }
+            }
 
-        //   - * = accesses shared data (ready queue), so be sure to use proper synchronization
+            // Signal lower-priority running processes to interrupt
+            if(shared_data->algorithm == ScheduleAlgorithm::PP)
+            {
+                shared_data->queue_mutex.lock();
+                if(!(shared_data->ready_queue.empty()))
+                {
+                    Process* highest_ready = shared_data->ready_queue.front();
+                    for(int j = 0; j < processes.size();j++)
+                    {
+                        if (processes[j]->getState() == Process::State::Running)
+                        {
+                            if(processes[j]->getPriority() > highest_ready->getPriority())
+                            {
+                                processes[j]->interrupt(); // Signal the core thread to handle preemption
+                            }
+                        }
+                    }
+                }
+                shared_data->queue_mutex.unlock();
+            }               
+        }
+
+        // Determine if simulation is complete
+        terminated_count = 0;
+        for(Process* p : processes) {
+            if(p->getState() == Process::State::Terminated) terminated_count++;
+        }
+        
+        // Capture the exact elapsed time when the first half of processes terminate
+        if (terminated_count >= processes.size() / 2 && time_half_terminated == 0) {
+            time_half_terminated = currentTime() - start;
+        }
+        shared_data->all_terminated = (terminated_count == processes.size());
+
         // Maybe simply print progress bar for all procs?
         printProcessOutput(processes);
 
-                // sleep 50 ms
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // sleep 50 ms
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-                // clear outout
-                erase();
-        
-        }
+        // clear outout
+        erase();
     }
     // wait for threads to finish
     for (i = 0; i < num_cores; i++)
@@ -277,7 +253,8 @@ int main(int argc, char *argv[])
     double total_turnaround_time = 0.0;
     double total_wait_time = 0.0;
     double total_cpu_time = 0.0;
-    for (Process* p : processes)    {
+    for (Process* p : processes)
+    {
         total_turnaround_time += p->getTurnaroundTime();
         total_wait_time += p->getWaitTime();
         total_cpu_time += p->getCpuTime();
@@ -287,20 +264,24 @@ int main(int argc, char *argv[])
     double average_wait_time = total_wait_time / processes.size();
 
     double cpu_utilization = (total_cpu_time / (num_cores * total_time / 1000.0)) * 100.0; // Convert ms to seconds and calculate percentage
-    double throughput_first_half = (processes.size() / 2) / (total_time / 1000.0); // Number of processes in first half divided by total time in seconds
-    double throughput_second_half = (processes.size() / 2) / (total_time / 1000.0); // Number of processes in second half divided by total time in seconds   
-    double overall_throughput = processes.size() / (total_time / 1000.0); // Total number of processes divided by total time in seconds 
-    //  - CPU utilization
-    printw("CPU Utilization: %.2f%%\n", cpu_utilization);    //  - Throughput
-    //Average for first 50% of processes finished
-    printw("Throughput (first 50%% of processes): %.2f processes/sec\n", throughput_first_half);    //     - Average for second 50% of processes finished
-    //average throughput for second half of processes
+    // Number of processes in first half divided by total time in seconds
+    double throughput_first_half = (processes.size() / 2.0) / (time_half_terminated / 1000.0); 
+    // Number of processes in second half divided by total time in seconds  
+    double throughput_second_half = (processes.size() / 2.0) / ((total_time - time_half_terminated) / 1000.0); 
+    // Total number of processes divided by total time in seconds 
+    double overall_throughput = processes.size() / (total_time / 1000.0); 
+    
+    // CPU utilization
+    printw("CPU Utilization: %.2f%%\n", cpu_utilization);
+    // Average for first half of processes finished
+    printw("Throughput (first 50%% of processes): %.2f processes/sec\n", throughput_first_half);
+    // Average throughput for second half of processes
     printw("Throughput (second 50%% of processes): %.2f processes/sec\n", throughput_second_half);    //     - Overall average
-    //overall throughput
+    // Overall throughput
     printw("Overall Throughput: %.2f processes/sec\n", overall_throughput);    //  - Average turnaround time
-    //average turnaround time
+    // Average turnaround time
     printw("Average Turnaround Time: %.2f ms\n", average_turnaround_time);    //  - Average waiting time
-    //Average wait time
+    // Average wait time
     printw("Average Waiting Time: %.2f ms\n", average_wait_time);
     
     refresh();  
@@ -333,73 +314,98 @@ void coreRunProcesses(uint8_t core_id, SchedulerData *shared_data)
     //   - Wait short bit (i.e. sleep 5 ms)
     //  - * = accesses shared data (ready queue), so be sure to use proper synchronization
 
+    // Core execution loop: continues until all processes are terminated
     while (!(shared_data->all_terminated))
     {
-        //lock ready queue mutex before accessing; remember to unlock when done
+        // Safely retrieve the next process from the front of the ready queue
         shared_data->queue_mutex.lock();
         if (!(shared_data->ready_queue.empty()))
         {
             Process *p = shared_data->ready_queue.front();
             shared_data->ready_queue.pop_front();
             shared_data->queue_mutex.unlock();
+
+            // Simulate context switch (load penalty)
             std::this_thread::sleep_for(std::chrono::milliseconds(shared_data->context_switch));
-            p->setState(Process::State::Running, currentTime());
+
+            // Update timers to capture the Wait Time spent in the queue
+            uint64_t now = currentTime();
+            p->updateProcess(now); 
+
+            // Assign to core and initialize active execution state
+            p->setState(Process::State::Running, now);
             p->setCpuCore(core_id);
+            p->setBurstStartTime(now);
 
-            p->setBurstStartTime(currentTime());
+            uint32_t time_on_core = 0; 
 
-            uint32_t time_on_core = 0; // Local counter for RR
-
-            while (p->getState() == Process::State::Running) 
+            // CPU burst simulation loop: runs until burst finishes or is interrupted
+            while (p->getState() == Process::State::Running && !p->isInterrupted()) 
             {
+                // Advance simulation by 5ms intervals
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                uint64_t now = currentTime();
-                time_on_core += now - p->getBurstStartTime();
-                p->updateProcess(currentTime());
-
-                // Check for interruptions
+                uint64_t update_now = currentTime();
+                time_on_core += update_now - p->getBurstStartTime();
+                p->updateProcess(update_now); // Deduct from remaining burst time
+                
+                // Round Robin: Signal a self-interrupt if the time slice is exceeded
                 if (shared_data->algorithm == ScheduleAlgorithm::RR && time_on_core >= shared_data->time_slice) 
                 {
-                    p->setState(Process::State::Ready, currentTime());
-                } 
-                else if (shared_data->algorithm == ScheduleAlgorithm::PP) 
-                {
-                    // PP Preemption Check
-                    shared_data->queue_mutex.lock();
-                    if (!shared_data->ready_queue.empty() && shared_data->ready_queue.front()->getPriority() < p->getPriority()) {
-                        p->setState(Process::State::Ready, currentTime());
-                    }
-                    shared_data->queue_mutex.unlock();
+                    p->interrupt(); 
                 }
-                // Note: If updateProcess() sees the burst hit 0, it changes state to IO or Terminated, 
-                // which naturally breaks this while loop!
             }
 
-            // POST-RUN CLEANUP
+            // Post-run cleanup
             p->setCpuCore(-1);
 
-            // If interrupted (RR or PP), put it back in the queue
-            if (p->getState() == Process::State::Ready) 
+            // Handle preemptions (RR time slice expiration or PP signal from main thread)
+            if (p->isInterrupted()) 
             {
+                // Change back to Ready and clear the interrupt flag
+                p->setState(Process::State::Ready, currentTime());
+                p->interruptHandled();
+                
+                // Safely re-insert the preempted process back into the ready queue
                 shared_data->queue_mutex.lock();
-                // TODO: If PP, you might need to sort. For RR, just push_back.
-                shared_data->ready_queue.push_back(p); 
+                
+                if (shared_data->algorithm == ScheduleAlgorithm::SJF) {
+                    // SJF: Insert maintaining order of shortest remaining time
+                    std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                    while(it != shared_data->ready_queue.end() && (*it)->getRemainingTime() <= p->getRemainingTime()) {
+                        ++it;
+                    }
+                    shared_data->ready_queue.insert(it, p);
+                } 
+                else if (shared_data->algorithm == ScheduleAlgorithm::PP) {
+                    // PP: Insert maintaining order of priority (lowest number first)
+                    std::list<Process*>::iterator it = shared_data->ready_queue.begin();
+                    while(it != shared_data->ready_queue.end() && (*it)->getPriority() <= p->getPriority()) {
+                        ++it;
+                    }
+                    shared_data->ready_queue.insert(it, p);
+                } 
+                else {
+                    // RR & FCFS: Push directly to the back of the line
+                    shared_data->ready_queue.push_back(p);
+                }
+                
                 shared_data->queue_mutex.unlock();
+                
+                // Restart the wait timer now that it is back in the queue
+                p->setBurstStartTime(currentTime()); 
             }
 
-            // Wait context switching SAVE time
+            // Simulate context switch (save penalty) before pulling the next process
             std::this_thread::sleep_for(std::chrono::milliseconds(shared_data->context_switch));
-
         }
         else
         {
+            // Idle core: If the queue is empty, unlock and sleep briefly before checking again
+            shared_data->queue_mutex.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-
     }
-
 }
-
 
 void printProcessOutput(std::vector<Process*>& processes)
 {
